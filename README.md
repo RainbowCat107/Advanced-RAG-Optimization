@@ -58,6 +58,7 @@
 └── benchmarks/                       
 
     └── test_chunking.md              # 包含复杂 Java 动态规划与 LaTeX 公式极限测试文档
+```
 
 ## 🛠️ 部署与快速复现指南 (Deployment & Reproduction)
 
@@ -93,3 +94,4 @@ python startup.py -a
 python auto_evaluator.py
 ```
 终端将自动读取 `evaluation_dataset.jsonl` 中的极限 Edge Cases，为您实时输出包含“事实忠实度 (Faithfulness)”、“回答相关性 (Relevance)”与“核心准确率 (Correctness)”的三维雷达图打分报告。
+
