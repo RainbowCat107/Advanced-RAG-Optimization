@@ -56,4 +56,40 @@
 │   └── kb_config.py                  # 全局分词器调度配置
 │
 └── benchmarks/                       
+
     └── test_chunking.md              # 包含复杂 Java 动态规划与 LaTeX 公式极限测试文档
+
+## 🛠️ 部署与快速复现指南 (Deployment & Reproduction)
+
+> **⚠️ 特别声明 (Notice):** > 为了保持核心算法的纯净度并突出本项目的增量贡献 (Incremental Contributions)，本仓库**并未**包含 Langchain-Chatchat 数百兆的原生基础代码。本仓库提供的所有 `.py` 文件均设计为**即插即用的核心补丁 (Core Patches)**。
+
+如果您希望在本地环境中完全复现本项目的双路召回、HyDE 意图拦截以及自动化评测闭环，请按照以下标准流程操作：
+
+### Step 1: 准备基础框架 (Base Framework Setup)
+首先，请克隆 Langchain-Chatchat 的官方原生仓库，并完成基础环境与依赖的安装：
+```bash
+git clone https://github.com/chatchat-space/Langchain-Chatchat.git
+cd Langchain-Chatchat
+# 按照官方指南完成 pip install -r requirements.txt 等初始化工作
+```
+
+### Step 2: 注入核心魔改补丁 (Inject Core Patches)
+将本仓库中的核心算法文件，精准覆盖到原生框架的对应深层目录中，完成底层逻辑的“换血”：
+
+1. **防截断分词器拦截：** 将本仓库 `core_algorithms/structure_aware_splitter.py` 覆盖至原生路径 `text_splitter/chinese_recursive_text_splitter.py`。
+2. **混合检索与 HyDE 中枢：** 将本仓库 `core_algorithms/hybrid_rrf_retrieval.py` 覆盖至原生路径 `server/chat/knowledge_base_chat.py`。
+3. **重排器健壮性保护锁：** 将本仓库 `core_algorithms/safe_reranker_loader.py` 覆盖至原生路径 `server/reranker/reranker.py`。
+4. **加载全局配置：**
+   将本仓库 `configs/kb_config.py` 覆盖原生目录下的对应配置文件，以激活自定义的分词器。
+
+### Step 3: 一键启动与自动化评测 (Automated Evaluation)
+补丁注入完成后，按照常规方式启动 Chatchat 服务：
+```bash
+python startup.py -a
+```
+服务成功运行后，**无需人工进行盲测**。请直接将本仓库 `evaluation_pipeline/` 目录下的测试集和裁判脚本拷贝至根目录，一键启动大模型量化打分：
+```bash
+# 启动 LLM-as-a-Judge 多维度裁判系统
+python auto_evaluator.py
+```
+终端将自动读取 `evaluation_dataset.jsonl` 中的极限 Edge Cases，为您实时输出包含“事实忠实度 (Faithfulness)”、“回答相关性 (Relevance)”与“核心准确率 (Correctness)”的三维雷达图打分报告。
