@@ -1,200 +1,263 @@
-![](img/logo-long-chatchat-trans-v2.png)
+# Advanced RAG Optimization
 
-🌍 [READ THIS IN ENGLISH](README_en.md)
-🌍 [日本語で読む](README_ja.md)
+本项目基于 `Langchain-Chatchat 0.2.x` 二次开发，重点不再是原版 Chatchat 的“本地大模型一键部署”，而是围绕知识库问答场景做 RAG 检索链路优化、OpenAI-compatible API 接入、轻量化启动和自动化评测。
 
-📃 **LangChain-Chatchat** (原 Langchain-ChatGLM)
+当前版本默认走在线或网关形式的大模型 API，适合接入 OpenAI、One API、New API、阿里云百炼、硅基流动等兼容 OpenAI 协议的服务；同时保留 Chatchat 原有的 FastAPI、Streamlit WebUI、知识库管理、FAISS 向量库和本地模型扩展能力。
 
-基于 ChatGLM 等大语言模型与 Langchain 等应用框架实现，开源、可离线部署的检索增强生成(RAG)大模型知识库项目。
+## 主要改动
 
-⚠️`0.2.10`将会是`0.2.x`系列的最后一个版本，`0.2.x`系列版本将会停止更新和技术支持，全力研发具有更强应用性的 `Langchain-Chatchat 0.3.x`。
+- 默认 LLM 改为 `openai-api`，通过环境变量配置 `OPENAI_API_KEY`、`OPENAI_API_BASE`、`OPENAI_API_MODEL`。
+- Embedding 支持 OpenAI-compatible `/embeddings` 接口，内置 `text-embedding-ada-002`、`text-embedding-3-small`、`text-embedding-3-large`、`text-embedding-v4` 等模型名。
+- 新增 `-i/--lite` 启动模式，API 模式下不再强制启动本地 `model_worker`，降低本机显存和模型路径依赖。
+- 知识库问答加入上下文感知 HyDE：结合最近对话生成假设性回答，再拼接原问题增强语义检索。
+- 检索链路改为 FAISS 向量召回 + BM25 关键词召回 + RRF 融合，兼顾语义匹配和精确术语匹配。
+- Reranker 默认关闭，可通过 `USE_RERANKER=true` 开启本地重排模型。
+- 中文递归切分器增强了 Markdown 代码块和 LaTeX 块级公式保护，避免重要结构被切碎。
+- 内置 `JAVA_GUIDE` 知识库与 `evaluation_dataset.jsonl`，配套 `auto_evaluator.py` 做 LLM-as-a-Judge 多维评测。
+- 增加 Windows 兼容用的 `pwd.py` shim，降低部分依赖在 Windows 环境下导入失败的概率。
+- 增加 `requirements_local_api_constraints.txt`，用于固定旧版 Chatchat 依赖栈在新版 pip 索引上的解析结果。
 
----
+## RAG 流程
 
-## 目录
-
-* [介绍](README.md#介绍)
-* [解决的痛点](README.md#解决的痛点)
-* [快速上手](README.md#快速上手)
-    * [1. 环境配置](README.md#1-环境配置)
-    * [2. 模型下载](README.md#2-模型下载)
-    * [3. 初始化知识库和配置文件](README.md#3-初始化知识库和配置文件)
-    * [4. 一键启动](README.md#4-一键启动)
-    * [5. 启动界面示例](README.md#5-启动界面示例)
-* [联系我们](README.md#联系我们)
-
-## 介绍
-
-🤖️ 一种利用 [langchain](https://github.com/langchain-ai/langchain)
-思想实现的基于本地知识库的问答应用，目标期望建立一套对中文场景与开源模型支持友好、可离线运行的知识库问答解决方案。
-
-💡 受 [GanymedeNil](https://github.com/GanymedeNil) 的项目 [document.ai](https://github.com/GanymedeNil/document.ai)
-和 [AlexZhangji](https://github.com/AlexZhangji)
-创建的 [ChatGLM-6B Pull Request](https://github.com/THUDM/ChatGLM-6B/pull/216)
-启发，建立了全流程可使用开源模型实现的本地知识库问答应用。本项目的最新版本中通过使用 [FastChat](https://github.com/lm-sys/FastChat)
-接入 Vicuna, Alpaca, LLaMA, Koala, RWKV 等模型，依托于 [langchain](https://github.com/langchain-ai/langchain)
-框架支持通过基于 [FastAPI](https://github.com/tiangolo/fastapi) 提供的 API
-调用服务，或使用基于 [Streamlit](https://github.com/streamlit/streamlit) 的 WebUI 进行操作。
-
-✅ 依托于本项目支持的开源 LLM 与 Embedding 模型，本项目可实现全部使用**开源**模型**离线私有部署**。与此同时，本项目也支持
-OpenAI GPT API 的调用，并将在后续持续扩充对各类模型及模型 API 的接入。
-
-⛓️ 本项目实现原理如下图所示，过程包括加载文件 -> 读取文本 -> 文本分割 -> 文本向量化 -> 问句向量化 ->
-在文本向量中匹配出与问句向量最相似的 `top k`个 -> 匹配出的文本作为上下文和问题一起添加到 `prompt`中 -> 提交给 `LLM`生成回答。
-
-📺 [原理介绍视频](https://www.bilibili.com/video/BV13M4y1e7cN/?share_source=copy_web&vd_source=e6c5aafe684f30fbe41925d61ca6d514)
-
-![实现原理图](img/langchain+chatglm.png)
-
-从文档处理角度来看，实现流程如下：
-
-![实现原理图2](img/langchain+chatglm2.png)
-
-🚩 本项目未涉及微调、训练过程，但可利用微调或训练对本项目效果进行优化。
-
-🌐 [AutoDL 镜像](https://www.codewithgpu.com/i/chatchat-space/Langchain-Chatchat/Langchain-Chatchat) 中 `v13`
-版本所使用代码已更新至本项目 `v0.2.9` 版本。
-
-🐳 [Docker 镜像](registry.cn-beijing.aliyuncs.com/chatchat/chatchat:0.2.6) 已经更新到 ```0.2.7``` 版本。
-
-🌲 一行命令运行 Docker ：
-
-```shell
-docker run -d --gpus all -p 80:8501 registry.cn-beijing.aliyuncs.com/chatchat/chatchat:0.2.7
+```mermaid
+flowchart LR
+    A[用户问题] --> B[结合最近历史生成 HyDE 假设答案]
+    B --> C[原问题 + 假设答案]
+    C --> D[FAISS 语义召回 Top-20]
+    D --> E[BM25 在候选池内做关键词排序]
+    D --> F[RRF 排名融合]
+    E --> F
+    F --> G[截取 Top-K 文档]
+    G --> H{USE_RERANKER}
+    H -->|true| I[本地 reranker 重排]
+    H -->|false| J[拼接上下文]
+    I --> J
+    J --> K[LLM 生成答案和引用来源]
 ```
 
-🧩 本项目有一个非常完整的[Wiki](https://github.com/chatchat-space/Langchain-Chatchat/wiki/) ， README只是一个简单的介绍，_
-_仅仅是入门教程，能够基础运行__。
-如果你想要更深入的了解本项目，或者想对本项目做出贡献。请移步 [Wiki](https://github.com/chatchat-space/Langchain-Chatchat/wiki/)
-界面
+核心代码在 [server/chat/knowledge_base_chat.py](server/chat/knowledge_base_chat.py)：
 
-## 解决的痛点
+- `reciprocal_rank_fusion()`：融合向量检索和 BM25 检索排名。
+- `hyde_prompt`：结合最近 3 条历史对话生成查询扩展内容。
+- `search_docs(... top_k=20)`：先扩大候选池，再由 BM25/RRF 进行二次排序。
 
-该项目是一个可以实现 __完全本地化__推理的知识库增强方案, 重点解决数据安全保护，私域化部署的企业痛点。
-本开源方案采用```Apache License```，可以免费商用，无需付费。
+## 目录说明
 
-我们支持市面上主流的本地大语言模型和Embedding模型，支持开源的本地向量数据库。
-支持列表详见[Wiki](https://github.com/chatchat-space/Langchain-Chatchat/wiki/)
-
-## 快速上手
-
-### 1. 环境配置
-
-+ 首先，确保你的机器安装了 Python 3.8 - 3.11 (我们强烈推荐使用 Python3.11)。
-
-```
-$ python --version
-Python 3.11.7
-```
-
-接着，创建一个虚拟环境，并在虚拟环境内安装项目的依赖
-
-```shell
-
-# 拉取仓库
-$ git clone https://github.com/chatchat-space/Langchain-Chatchat.git
-
-# 进入目录
-$ cd Langchain-Chatchat
-
-# 安装全部依赖
-$ pip install -r requirements.txt 
-$ pip install -r requirements_api.txt
-$ pip install -r requirements_webui.txt  
-
-# 默认依赖包括基本运行环境（FAISS向量库）。如果要使用 milvus/pg_vector 等向量库，请将 requirements.txt 中相应依赖取消注释再安装。
+```text
+.
+├── startup.py                              # 服务启动入口，支持 -a -i Lite 模式
+├── auto_evaluator.py                       # RAG 自动评测脚本
+├── evaluation_dataset.jsonl                # JavaGuide 问答评测集
+├── requirements_local_api_constraints.txt  # 本地 API 模式依赖约束
+├── configs/
+│   ├── model_config.py                     # LLM、Embedding、Reranker 配置
+│   ├── kb_config.py                        # 知识库、切分、向量库配置
+│   └── prompt_config.py                    # 对话和知识库问答 Prompt
+├── server/
+│   ├── chat/knowledge_base_chat.py         # HyDE + FAISS + BM25 + RRF 主链路
+│   ├── knowledge_base/kb_cache/base.py     # OpenAI-compatible Embedding 封装
+│   ├── knowledge_base/kb_cache/faiss_cache.py
+│   └── reranker/reranker.py
+├── text_splitter/chinese_recursive_text_splitter.py
+├── webui.py
+└── knowledge_base/
+    ├── JAVA_GUIDE/                         # JavaGuide 测试知识库
+    └── samples/                            # 原版示例知识库
 ```
 
-请注意，LangChain-Chatchat `0.2.x` 系列是针对 Langchain `0.0.x` 系列版本的，如果你使用的是 Langchain `0.1.x`
-系列版本，需要降级您的`Langchain`版本。
+## 环境要求
 
-### 2， 模型下载
+- Python 3.10 或 3.11 推荐。
+- Windows / Linux 均可运行；本仓库当前配置对 Windows 本地 API 模式更友好。
+- 默认 API 模式不需要本地大模型权重。
+- 使用本地 reranker 或本地 LLM 时，需要自行准备模型路径和对应硬件资源。
 
-如需在本地或离线环境下运行本项目，需要首先将项目所需的模型下载至本地，通常开源 LLM 与 Embedding
-模型可以从 [HuggingFace](https://huggingface.co/models) 下载。
+## 安装
 
-以本项目中默认使用的 LLM 模型 [THUDM/ChatGLM3-6B](https://huggingface.co/THUDM/chatglm3-6b) 与 Embedding
-模型 [BAAI/bge-large-zh](https://huggingface.co/BAAI/bge-large-zh) 为例：
+在项目根目录执行：
 
-下载模型需要先[安装 Git LFS](https://docs.github.com/zh/repositories/working-with-files/managing-large-files/installing-git-large-file-storage)
-，然后运行
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
 
-```Shell
-$ git lfs install
-$ git clone https://huggingface.co/THUDM/chatglm3-6b
-$ git clone https://huggingface.co/BAAI/bge-large-zh
+pip install -c requirements_local_api_constraints.txt -r requirements.txt
+pip install jieba rank_bm25
 ```
 
-### 3. 初始化知识库和配置文件
+如果你只想拆分安装，也可以按原 Chatchat 的方式安装：
 
-按照下列方式初始化自己的知识库和简单的复制配置文件
-
-```shell
-$ python copy_config_example.py
-$ python init_database.py --recreate-vs
- ```
-
-### 4. 一键启动
-
-按照以下命令启动项目
-
-```shell
-$ python startup.py -a
+```powershell
+pip install -c requirements_local_api_constraints.txt -r requirements_api.txt
+pip install -c requirements_local_api_constraints.txt -r requirements_webui.txt
 ```
 
-### 5. 启动界面示例
+## 配置大模型 API
 
-如果正常启动，你将能看到以下界面
+### OpenAI 示例
 
-1. FastAPI Docs 界面
+```powershell
+$env:OPENAI_API_KEY="你的 API Key"
+$env:OPENAI_API_BASE="https://api.openai.com/v1"
+$env:OPENAI_API_MODEL="gpt-4o-mini"
+$env:LLM_MODELS="openai-api"
+$env:EMBEDDING_MODEL="text-embedding-3-small"
+$env:USE_RERANKER="false"
+$env:OPENAI_PROXY=""
+```
 
-![](img/fastapi_docs_026.png)
+### 阿里云百炼兼容模式示例
 
-2. Web UI 启动界面示例：
+```powershell
+$env:OPENAI_API_KEY="你的阿里云百炼 API Key"
+$env:OPENAI_API_BASE="https://dashscope.aliyuncs.com/compatible-mode/v1"
+$env:OPENAI_API_MODEL="qwen-plus"
+$env:LLM_MODELS="openai-api"
+$env:EMBEDDING_MODEL="text-embedding-v4"
+$env:USE_RERANKER="false"
+$env:OPENAI_PROXY=""
+```
 
-- Web UI 对话界面：
+`text-embedding-v4` 默认按 1024 维创建 FAISS 索引。如你的网关返回其他维度，可以显式指定：
 
-![img](img/LLM_success.png)
+```powershell
+$env:OPENAI_EMBEDDING_DIMENSIONS="1024"
+# 或
+$env:DASHSCOPE_EMBEDDING_DIMENSIONS="1024"
+```
 
-- Web UI 知识库管理页面：
+## 初始化知识库
 
-![](img/init_knowledge_base.jpg)
+切换 Embedding 模型后，必须重建向量库，否则可能出现 FAISS 维度不一致的问题。
 
-### 注意
+```powershell
+python init_database.py --recreate-vs
+```
 
-以上方式只是为了快速上手，如果需要更多的功能和自定义启动方式
-，请参考[Wiki](https://github.com/chatchat-space/Langchain-Chatchat/wiki/)
+本仓库内置了两个主要知识库：
 
+- `samples`：原 Chatchat 示例知识库。
+- `JAVA_GUIDE`：用于 RAG 优化和自动评测的 JavaGuide 文档知识库。
 
----
+WebUI 中可以在“知识库管理”页面上传、更新、重建知识库文件。
 
-## 项目里程碑
+## 启动
 
-+ `2023年4月`: `Langchain-ChatGLM 0.1.0` 发布，支持基于 ChatGLM-6B 模型的本地知识库问答。
-+ `2023年8月`: `Langchain-ChatGLM` 改名为 `Langchain-Chatchat`，`0.2.0` 发布，使用 `fastchat` 作为模型加载方案，支持更多的模型和数据库。
-+ `2023年10月`: `Langchain-Chatchat 0.2.5` 发布，推出 Agent 内容，开源项目在`Founder Park & Zhipu AI & Zilliz`
-  举办的黑客马拉松获得三等奖。
-+ `2023年12月`: `Langchain-Chatchat` 开源项目获得超过 **20K** stars.
-+ `2024年1月`: `LangChain 0.1.x` 推出，`Langchain-Chatchat 0.2.x` 发布稳定版本`0.2.10`
-  后将停止更新和技术支持，全力研发具有更强应用性的 `Langchain-Chatchat 0.3.x`。
+推荐使用本地 API Lite 模式：
 
-+ 🔥 让我们一起期待未来 Chatchat 的故事 ···
+```powershell
+python startup.py -a -i
+```
 
----
+启动成功后访问：
 
-## 联系我们
+- WebUI: http://127.0.0.1:6006
+- API Docs: http://127.0.0.1:7861/docs
+- Chatchat API: http://127.0.0.1:7861
 
-### Telegram
+常用接口：
 
-[![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white "langchain-chatglm")](https://t.me/+RjliQ3jnJ1YyN2E9)
+- `POST /chat/chat`：普通 LLM 对话。
+- `POST /chat/knowledge_base_chat`：知识库问答，已接入 HyDE + 混合检索 + RRF。
+- `POST /knowledge_base/*`：知识库管理相关接口。
 
-### 项目交流群
-<img src="img/qr_code_87.jpg" alt="二维码" width="300" />
+如果你确实要使用本地模型 worker，可以关闭 Lite 模式并在 `configs/model_config.py` 中配置本地模型路径：
 
-🎉 Langchain-Chatchat 项目微信交流群，如果你也对本项目感兴趣，欢迎加入群聊参与讨论交流。
+```powershell
+python startup.py -a
+```
 
-### 公众号
+## Reranker
 
-<img src="img/official_wechat_mp_account.png" alt="二维码" width="300" />
+默认关闭 reranker，避免 API 模式下额外下载或加载本地模型：
 
-🎉 Langchain-Chatchat 项目官方公众号，欢迎扫码关注。
+```powershell
+$env:USE_RERANKER="false"
+```
+
+如需启用，需要先准备 `sentence_transformers` 依赖和本地 reranker 模型路径，例如 `bge-reranker-large`：
+
+```powershell
+$env:USE_RERANKER="true"
+$env:RERANKER_MODEL="bge-reranker-large"
+```
+
+模型路径在 [configs/model_config.py](configs/model_config.py) 的 `MODEL_PATH["reranker"]` 中配置。
+
+## 自动评测
+
+先启动服务，再运行：
+
+```powershell
+$env:RAG_MODEL_NAME="openai-api"
+$env:RAG_KB_NAME="JAVA_GUIDE"
+python auto_evaluator.py
+```
+
+评测脚本会读取 [evaluation_dataset.jsonl](evaluation_dataset.jsonl)，逐条调用 `/chat/knowledge_base_chat` 获取 RAG 答案，然后用 `/chat/chat` 做 LLM-as-a-Judge 打分。
+
+当前评测维度：
+
+- `Faithfulness`：事实忠实度，观察是否出现幻觉或编造。
+- `Answer Relevance`：回答相关性，观察是否答非所问。
+- `Correctness`：核心准确率，观察结论是否与标准答案一致。
+
+评测集覆盖了精确匹配、逻辑推理、模糊问法和多跳问题等类型。
+
+## 常见问题
+
+### 1. 启动后提示没有 API Key
+
+确认当前终端已经设置：
+
+```powershell
+$env:OPENAI_API_KEY="..."
+```
+
+PowerShell 环境变量只在当前窗口有效，换窗口后需要重新设置。
+
+### 2. FAISS 报维度不一致
+
+通常是因为更换了 Embedding 模型，但旧向量库还在。重建即可：
+
+```powershell
+python init_database.py --recreate-vs
+```
+
+### 3. `rank_bm25` 或 `jieba` 缺失
+
+混合检索依赖这两个包：
+
+```powershell
+pip install jieba rank_bm25
+```
+
+### 4. API 网关不是 OpenAI 官方地址
+
+只要网关兼容 OpenAI Chat Completions 和 Embeddings 协议，修改这几个变量即可：
+
+```powershell
+$env:OPENAI_API_BASE="你的兼容网关 /v1 地址"
+$env:OPENAI_API_MODEL="你的聊天模型名"
+$env:EMBEDDING_MODEL="你的 embedding 模型名"
+```
+
+### 5. 开启 reranker 后报模型或依赖错误
+
+`USE_RERANKER=true` 会加载本地 CrossEncoder 模型。请确认：
+
+- 已安装 `sentence_transformers`。
+- `configs/model_config.py` 中的 reranker 路径存在。
+- 当前设备有足够内存或显存。
+
+## 与原版 Chatchat 的关系
+
+本项目仍然保留并复用 Langchain-Chatchat 的主体架构，包括 FastAPI 服务、Streamlit WebUI、知识库管理、向量库封装、Prompt 模板和部分模型 worker 机制。
+
+本仓库的主要目标是演示和验证一条更适合知识库问答质量优化的 RAG 管线：
+
+```text
+上下文感知查询扩展 -> 语义召回 -> 关键词召回 -> RRF 融合 -> 可选重排 -> 自动评测
+```
+
+原项目遵循 Apache License 2.0，本项目在其基础上继续保留相同许可证。详见 [LICENSE](LICENSE)。
