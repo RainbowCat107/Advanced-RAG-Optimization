@@ -1,0 +1,26 @@
+# Keep the old 0.2.x dependency stack stable on modern pip indexes.
+# Install with: pip install -c requirements_local_api_constraints.txt ...
+
+wheel==0.42.0
+greenlet==3.0.3
+packaging==23.2
+numpy==1.26.4
+pandas==2.2.0
+typing_extensions==4.9.0
+altair==5.2.0
+rich==13.7.0
+jsonschema==4.21.1
+jsonschema-specifications==2023.12.1
+referencing==0.33.0
+rpds-py==0.17.1
+pyarrow==15.0.2
+httpx==0.26.0
+streamlit==1.30.0
+streamlit-option-menu==0.3.12
+streamlit-antd-components==0.3.1
+streamlit-chatbox==1.1.11
+streamlit-modal==0.1.0
+streamlit-aggrid==0.3.4.post3
+watchdog==3.0.0
+unstructured==0.12.6
+unstructured-inference==0.7.23
